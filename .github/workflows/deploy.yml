@@ -1,0 +1,92 @@
+
+name: Deploy Auras effect
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --no-progress
+        timeout-minutes: 6
+        env:
+          npm_config_fetch_retries: 2
+          npm_config_fetch_timeout: 120000
+          npm_config_fetch_retry_mintimeout: 10000
+          npm_config_fetch_retry_maxtimeout: 30000
+
+      - name: Run tests
+        run: npm test
+        timeout-minutes: 3
+
+      - name: Build extension
+        run: npm run build
+        timeout-minutes: 5
+
+      - name: Verify build output
+        run: |
+          test -s dist/index.html
+          test -s dist/manifest.json
+          test -s dist/icon.svg
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const manifest = JSON.parse(fs.readFileSync('dist/manifest.json', 'utf8'));
+          if (manifest.name !== 'Auras effect') throw new Error('Unexpected manifest name');
+          if (!manifest.version) throw new Error('Manifest version is missing');
+          if (manifest.action?.title !== 'Auras effect') throw new Error('Unexpected extension title');
+          if (manifest.action?.popover !== 'https://doctorlowcoding.github.io/Auras-effect/') {
+            throw new Error('Manifest popover URL does not match GitHub Pages');
+          }
+          NODE
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./dist
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy site
+        id: deployment
+        uses: actions/deploy-pages@v5
