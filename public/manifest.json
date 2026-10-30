@@ -1,0 +1,12 @@
+{
+  "name": "Auras effect",
+  "version": "2.4.5",
+  "manifest_version": 1,
+  "action": {
+    "title": "Auras effect",
+    "icon": "https://doctorlowcoding.github.io/Auras-effect/icon.svg",
+    "popover": "https://doctorlowcoding.github.io/Auras-effect/",
+    "width": 380,
+    "height": 900
+  }
+}

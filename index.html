@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="theme-color" content="#171b23" />
+    <title>Auras effect</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <h1>Auras effect</h1>
+      </header>
+
+      <main class="panel">
+        <section class="field-group">
+          <span class="field-label">Режим</span>
+          <div class="segmented" role="group" aria-label="Режим ауры">
+            <button class="segment active" type="button" data-mode="simple" aria-pressed="true">Обычный</button>
+            <button class="segment" type="button" data-mode="effect" aria-pressed="false">Эффекты</button>
+          </div>
+        </section>
+
+        <section id="effect-wrap" class="field-group hidden">
+          <label class="field-label" for="effect">Эффект</label>
+          <select id="effect">
+            <option value="spirits">Духовные стражи</option>
+            <option value="electric">Электрический шар</option>
+            <option value="lens">Рыбий глаз</option>
+            <option value="glow">Свечение</option>
+            <option value="shield">Щит</option>
+            <option value="touch">Осязание</option>
+            <option value="fog">Туман</option>
+          </select>
+        </section>
+
+        <div class="grid-two">
+          <section class="field-group">
+            <label class="field-label" for="radius">Радиус, клеток</label>
+            <div class="number-stepper">
+              <button id="radius-down" class="stepper-button" type="button" aria-label="Уменьшить радиус">−</button>
+              <input id="radius" type="number" min="1" max="20" step="1" value="3" inputmode="numeric" />
+              <button id="radius-up" class="stepper-button" type="button" aria-label="Увеличить радиус">+</button>
+            </div>
+          </section>
+          <section class="field-group">
+            <label class="field-label" for="opacity">Непрозрачность <output id="opacity-value" for="opacity">35%</output></label>
+            <input id="opacity" type="range" min="5" max="100" step="1" value="35" />
+          </section>
+        </div>
+
+        <div class="grid-two">
+          <section class="field-group">
+            <label class="field-label" for="color">Цвет</label>
+            <div class="color-control">
+              <input id="color" type="color" value="#39a9ff" />
+              <output id="color-value" for="color">#39A9FF</output>
+            </div>
+          </section>
+          <section id="speed-wrap" class="field-group">
+            <label class="field-label" for="speed">Скорость</label>
+            <input id="speed" type="range" min="1" max="10" step="1" value="5" />
+          </section>
+        </div>
+
+        <section id="light-wrap" class="field-group hidden">
+          <label class="field-label" for="light">Свет</label>
+          <input id="light" type="range" min="0" max="100" step="1" value="55" />
+        </section>
+<div class="actions">
+          <button id="apply" class="button button-primary" type="button">Добавить ауру</button>
+          <button id="save-edit" class="button button-primary hidden" type="button">Сохранить изменения</button>
+          <button id="cancel-edit" class="button button-secondary hidden" type="button">Отмена</button>
+        </div>
+
+        <section class="auras-section">
+          <div class="auras-heading">
+            <span class="field-label">Добавленные ауры <output id="aura-count">0</output></span>
+            <button id="refresh-auras" class="small-button" type="button">Обновить</button>
+          </div>
+          <div id="auras-list" class="auras-list" aria-live="polite" aria-relevant="additions removals"></div>
+          <button id="remove" class="button button-danger" type="button">Удалить все ауры</button>
+        </section>
+
+        <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true">—</div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
