@@ -42,9 +42,10 @@ jobs:
       - name: Verify output
         run: |
           test -s dist/index.html
+          test -s dist/background.html
           test -s dist/manifest.json
           test -s dist/icon.svg
-          node --input-type=module -e "import fs from 'node:fs'; const m = JSON.parse(fs.readFileSync('dist/manifest.json', 'utf8')); if (m.name !== 'Auras effect' || m.version !== '2.5.0' || m.action?.title !== 'Auras effect' || m.action?.popover !== 'https://doctorlowcoding.github.io/Auras-effect/') process.exit(1);"
+          node --input-type=module -e "import fs from 'node:fs'; const m = JSON.parse(fs.readFileSync('dist/manifest.json', 'utf8')); if (m.name !== 'Auras effect' || m.version !== '2.5.2' || m.action?.title !== 'Auras effect' || m.action?.popover !== 'https://doctorlowcoding.github.io/Auras-effect/' || m.background_url !== 'https://doctorlowcoding.github.io/Auras-effect/background.html') process.exit(1);"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

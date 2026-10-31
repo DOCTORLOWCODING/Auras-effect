@@ -1,7 +1,7 @@
-import OBR, { buildEffect, buildShape, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { buildShape, isImage } from "@owlbear-rodeo/sdk";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./settings.js";
-import { calculateAuraDiameter, calculateDistortExtent, getEffectPosition, getAuraPosition, getTokenAttachmentOrigin, getTokenGeometry } from "./geometry.js";
-import { SHADERS } from "./shaders.js";
+import { calculateAuraDiameter, calculateDistortExtent, getAuraPosition, getTokenAttachmentOrigin, getTokenGeometry } from "./geometry.js";
+import { getAuraRecordSignature } from "./sync-state.js";
 import "./style.css";
 
 const EXTENSION_ID = "io.github.doctorlowcoding.token-auras";
@@ -11,7 +11,6 @@ const LEGACY_AURA_KEYS = ["com.example.token-auras/aura"];
 const MAX_SELECTED_TOKENS = 50;
 const MAX_AURAS_PER_TOKEN = 24;
 const MAX_ITEM_SIZE = 50000;
-const MAX_SHARED_EFFECTS = 300;
 const SHADER_SYNC_CHANNEL = `${EXTENSION_ID}/sync`;
 const RADIUS_MIN = 1;
 const RADIUS_MAX = 20;
@@ -40,10 +39,8 @@ const state = {
   selectionPollBusy: false,
   listRefreshGeneration: 0,
   listRefreshScheduled: false,
-  shaderSyncPromise: null,
-  shaderSyncPending: false,
-  shaderSyncScheduled: false,
-  legacyMigrationPromise: null,
+  sharedAuraSignature: null,
+  localAuraSignature: null,
 };
 
 function setStatus(message, isError = false) {
@@ -129,41 +126,6 @@ function cancelEditing(resetForm = true) {
   renderAuraList(state.records);
 }
 
-function hexToVector(hex) {
-  const value = Number.parseInt(hex.slice(1), 16);
-  return {
-    x: ((value >> 16) & 255) / 255,
-    y: ((value >> 8) & 255) / 255,
-    z: (value & 255) / 255,
-  };
-}
-
-function buildShader(settingsInput, geometry) {
-  const settings = normalizeSettings(settingsInput);
-  if (settings.effect === "lens") {
-    const itemRadiusUnits = Math.max(geometry.width, geometry.height) / (2 * geometry.dpi);
-    return {
-      sksl: SHADERS.lens,
-      uniforms: [
-        { name: "dpi", value: geometry.dpi },
-        { name: "numUnits", value: settings.radius },
-        { name: "itemRadiusUnits", value: itemRadiusUnits },
-        // Reuse the existing opacity control as the Distort warp strength.
-        { name: "warpFactor", value: (settings.opacity / 100) * (0.2 / 0.35) },
-        { name: "speed", value: settings.speed / 5 },
-      ],
-    };
-  }
-
-  const uniforms = [
-    { name: "auraColor", value: hexToVector(settings.color) },
-    { name: "alpha", value: settings.opacity / 100 },
-    { name: "speed", value: settings.speed / 5 },
-  ];
-  if (settings.effect === "fog") uniforms.push({ name: "light", value: settings.light / 100 });
-  return { sksl: SHADERS[settings.effect], uniforms };
-}
-
 function getAuraMetadata(item) {
   if (!item?.metadata || typeof item.metadata !== "object" || Array.isArray(item.metadata)) return null;
   for (const key of [AURA_KEY, ...LEGACY_AURA_KEYS]) {
@@ -213,7 +175,7 @@ async function removeAuras(tokenIds) {
   const predicate = (item) => isOwnedAura(item, safeTokenIds);
   const [sceneItems, localItems] = await Promise.all([
     OBR.scene.items.getItems(predicate),
-    OBR.scene.local.getItems(predicate),
+    OBR.scene.local.getItems((item) => predicate(item) && getAuraMetadata(item)?.kind !== "shader-renderer"),
   ]);
   const sceneIds = sceneItems.map((item) => item.id);
   const localIds = localItems.map((item) => item.id);
@@ -228,9 +190,7 @@ async function removeAuras(tokenIds) {
   return sceneIds.length + localIds.length;
 }
 
-async function getAuraGeometry(token, settings, dpi) {
-  const bounds = await OBR.scene.items.getItemBounds([token.id]);
-  const tokenGeometry = getTokenGeometry(bounds, dpi);
+function buildAuraGeometry(tokenGeometry, settings, dpi) {
   const diameter = calculateAuraDiameter(tokenGeometry, dpi, settings.radius);
   const distortExtent = calculateDistortExtent(tokenGeometry, dpi, settings.radius);
   if (!Number.isFinite(diameter) || diameter <= 0 || diameter > MAX_ITEM_SIZE) {
@@ -240,6 +200,33 @@ async function getAuraGeometry(token, settings, dpi) {
     throw new Error("Некорректный размер эффекта искажения");
   }
   return { ...tokenGeometry, diameter, distortExtent, dpi };
+}
+
+async function getAuraGeometry(token, settings, dpi) {
+  const bounds = await OBR.scene.items.getItemBounds([token.id]);
+  return buildAuraGeometry(getTokenGeometry(bounds, dpi), settings, dpi);
+}
+
+function getSharedAuraRecordSignature(items) {
+  return getAuraRecordSignature(items, getAuraMetadata, normalizeSettings);
+}
+
+function handleSceneItemsChanged(items) {
+  if (!Array.isArray(items)) return;
+  const signature = getSharedAuraRecordSignature(items);
+  if (signature !== state.sharedAuraSignature) {
+    state.sharedAuraSignature = signature;
+    scheduleAuraListRefresh();
+  }
+}
+
+function handleLocalItemsChanged(items) {
+  if (!Array.isArray(items)) return;
+  const signature = getSharedAuraRecordSignature(items);
+  if (signature !== state.localAuraSignature) {
+    state.localAuraSignature = signature;
+    scheduleAuraListRefresh();
+  }
 }
 
 function createSceneAura(token, settingsInput, geometry, createdAt = Date.now()) {
@@ -292,48 +279,6 @@ function createEffectDefinition(token, settingsInput, geometry, createdAt = Date
     .build();
 }
 
-function getEffectRenderSignature(settingsInput, geometry) {
-  const settings = normalizeSettings({ ...settingsInput, mode: "effect" });
-  return JSON.stringify({
-    version: 1,
-    settings,
-    diameter: geometry.diameter,
-    distortExtent: geometry.distortExtent,
-    dpi: geometry.dpi,
-  });
-}
-
-function createLocalEffect(token, settingsInput, geometry, sourceAuraId, signature, createdAt = Date.now()) {
-  const settings = normalizeSettings({ ...settingsInput, mode: "effect" });
-  const isLens = settings.effect === "lens";
-  const shader = buildShader(settings, geometry);
-  const extent = isLens ? geometry.distortExtent : geometry.diameter;
-  const origin = getTokenAttachmentOrigin(token);
-
-  const builder = buildEffect()
-    .name(`Auras effect — ${EFFECT_LABELS[settings.effect]}`)
-    .effectType("STANDALONE")
-    .width(extent)
-    .height(extent)
-    .position(getEffectPosition(origin, extent))
-    .attachedTo(token.id)
-    .disableAttachmentBehavior(["ROTATION", "LOCKED", "COPY"])
-    .layer(isLens ? "POST_PROCESS" : "ATTACHMENT")
-    .locked(true)
-    .disableHit(true);
-
-  if (!isLens) builder.blendMode("SRC_OVER");
-
-  return builder
-    .sksl(shader.sksl)
-    .uniforms(shader.uniforms)
-    .metadata(auraMetadata(token, settings, "shader-renderer", createdAt, {
-      sourceAuraId,
-      renderSignature: signature,
-    }))
-    .build();
-}
-
 function createAuraEntry(token, settingsInput, geometry, createdAt = Date.now()) {
   const settings = normalizeSettings(settingsInput);
   if (settings.mode === "simple") {
@@ -347,211 +292,12 @@ function isSharedEffectDefinition(item) {
   return item?.type === "SHAPE" && metadata?.kind === "effect-definition";
 }
 
-function isLocalShaderRenderer(item) {
-  const metadata = getAuraMetadata(item);
-  return item?.type === "EFFECT" && metadata?.kind === "shader-renderer"
-    && typeof metadata.sourceAuraId === "string" && metadata.sourceAuraId.length > 0;
-}
-
-async function syncLocalShaderEffectsOnce() {
-  if (!state.sceneReady || !await OBR.scene.isReady()) return;
-
-  const [sceneItems, localItems] = await Promise.all([
-    OBR.scene.items.getItems(),
-    OBR.scene.local.getItems(),
-  ]);
-  const definitions = sceneItems
-    .filter(isSharedEffectDefinition)
-    .sort((a, b) => {
-      const left = Number(getAuraMetadata(a)?.createdAt) || 0;
-      const right = Number(getAuraMetadata(b)?.createdAt) || 0;
-      return left - right || a.id.localeCompare(b.id);
-    })
-    .slice(0, MAX_SHARED_EFFECTS);
-  const tokensNeeded = new Set(definitions.map((item) => getAuraOwnerTokenId(item)).filter(Boolean));
-  const tokens = sceneItems.filter((item) => tokensNeeded.has(item.id) && item.layer === "CHARACTER" && isImage(item));
-  const tokenById = new Map(tokens.map((token) => [token.id, token]));
-  const dpi = Number(await OBR.scene.grid.getDpi());
-  if (!Number.isFinite(dpi) || dpi <= 0 || dpi > MAX_ITEM_SIZE) return;
-
-  const desired = new Map();
-  for (const definition of definitions) {
-    const metadata = getAuraMetadata(definition);
-    const token = tokenById.get(metadata?.ownerTokenId);
-    if (!token) continue;
-    const settings = normalizeSettings({ ...(metadata?.settings ?? {}), mode: "effect" });
-    const geometry = await getAuraGeometry(token, settings, dpi);
-    const signature = getEffectRenderSignature(settings, geometry);
-    desired.set(definition.id, { definition, token, settings, geometry, signature, createdAt: metadata.createdAt });
-  }
-
-  const current = localItems.filter(isLocalShaderRenderer);
-  const currentBySource = new Map();
-  for (const item of current) {
-    const sourceAuraId = getAuraMetadata(item).sourceAuraId;
-    const group = currentBySource.get(sourceAuraId) ?? [];
-    group.push(item);
-    currentBySource.set(sourceAuraId, group);
-  }
-
-  const removeIds = [];
-  const addItems = [];
-  for (const [sourceAuraId, localGroup] of currentBySource) {
-    const expected = desired.get(sourceAuraId);
-    if (!expected) {
-      removeIds.push(...localGroup.map((item) => item.id));
-      continue;
-    }
-    const matching = localGroup.find((item) => getAuraMetadata(item).renderSignature === expected.signature);
-    if (matching) {
-      removeIds.push(...localGroup.filter((item) => item.id !== matching.id).map((item) => item.id));
-    } else {
-      removeIds.push(...localGroup.map((item) => item.id));
-      addItems.push(createLocalEffect(
-        expected.token,
-        expected.settings,
-        expected.geometry,
-        sourceAuraId,
-        expected.signature,
-        Number(expected.createdAt) || Date.now(),
-      ));
-    }
-  }
-
-  for (const [sourceAuraId, expected] of desired) {
-    if (currentBySource.has(sourceAuraId)) continue;
-    addItems.push(createLocalEffect(
-      expected.token,
-      expected.settings,
-      expected.geometry,
-      sourceAuraId,
-      expected.signature,
-      Number(expected.createdAt) || Date.now(),
-    ));
-  }
-
-  // Add replacements before deleting stale renderers to avoid a visible flash.
-  if (addItems.length) await OBR.scene.local.addItems(addItems);
-  if (removeIds.length) await OBR.scene.local.deleteItems(removeIds);
-}
-
-async function syncLocalShaderEffects() {
-  if (state.shaderSyncPromise) {
-    state.shaderSyncPending = true;
-    return state.shaderSyncPromise;
-  }
-  state.shaderSyncPromise = (async () => {
-    do {
-      state.shaderSyncPending = false;
-      await syncLocalShaderEffectsOnce();
-    } while (state.shaderSyncPending);
-  })();
-  try {
-    await state.shaderSyncPromise;
-  } finally {
-    state.shaderSyncPromise = null;
-  }
-}
-
-function scheduleShaderSync() {
-  if (state.shaderSyncScheduled) return;
-  state.shaderSyncScheduled = true;
-  queueMicrotask(() => {
-    state.shaderSyncScheduled = false;
-    void syncLocalShaderEffects().catch((error) => {
-      console.warn("Auras effect: shared shader sync failed", error);
-    });
-  });
-}
-
 async function notifyOtherClientsOfAuraChange() {
   try {
     await OBR.broadcast.sendMessage(SHADER_SYNC_CHANNEL, { type: "SYNC_AURAS" }, { destination: "ALL" });
   } catch (error) {
     console.warn("Auras effect: peer notification failed", error);
   }
-}
-
-async function migrateLegacyLocalEffectsOnce() {
-  if (!await OBR.scene.isReady()) return;
-  const [localItems, sceneItems] = await Promise.all([
-    OBR.scene.local.getItems((item) => {
-      const metadata = getAuraMetadata(item);
-      return item.type === "EFFECT" && metadata?.kind === "shader" && typeof metadata.ownerTokenId === "string";
-    }),
-    OBR.scene.items.getItems(),
-  ]);
-  if (!localItems.length) return;
-
-  const tokenById = new Map(sceneItems
-    .filter((item) => item.layer === "CHARACTER" && isImage(item))
-    .map((item) => [item.id, item]));
-  const migratedLocalIds = new Set(sceneItems
-    .filter(isSharedEffectDefinition)
-    .map((item) => getAuraMetadata(item).legacyLocalId)
-    .filter((id) => typeof id === "string"));
-  const dpi = Number(await OBR.scene.grid.getDpi());
-  if (!Number.isFinite(dpi) || dpi <= 0 || dpi > MAX_ITEM_SIZE) return;
-
-  let migratedAny = false;
-  for (const localItem of localItems) {
-    const metadata = getAuraMetadata(localItem);
-    if (migratedLocalIds.has(localItem.id)) {
-      await OBR.scene.local.deleteItems([localItem.id]);
-      continue;
-    }
-    const token = tokenById.get(metadata.ownerTokenId);
-    if (!token) continue;
-    const settings = normalizeSettings({ ...(metadata.settings ?? {}), mode: "effect" });
-    const geometry = await getAuraGeometry(token, settings, dpi);
-    const definition = createEffectDefinition(token, settings, geometry, Number(metadata.createdAt) || Date.now(), {
-      legacyLocalId: localItem.id,
-    });
-    await OBR.scene.items.addItems([definition]);
-    await OBR.scene.local.deleteItems([localItem.id]);
-    migratedLocalIds.add(localItem.id);
-    migratedAny = true;
-  }
-  if (migratedAny) await notifyOtherClientsOfAuraChange();
-}
-
-async function migrateLegacyLocalEffects() {
-  if (state.legacyMigrationPromise) return state.legacyMigrationPromise;
-  state.legacyMigrationPromise = migrateLegacyLocalEffectsOnce();
-  try {
-    await state.legacyMigrationPromise;
-  } finally {
-    state.legacyMigrationPromise = null;
-  }
-}
-
-async function cleanupLegacyEffectObjects() {
-  if (!await OBR.scene.isReady()) return;
-  const [legacySceneItems, localItems] = await Promise.all([
-    OBR.scene.items.getItems((item) => {
-      const meta = item.metadata?.[AURA_KEY];
-      return item.type === "SHAPE" && meta?.kind === "effect-carrier";
-    }),
-    OBR.scene.local.getItems((item) => {
-      const meta = item.metadata?.[AURA_KEY];
-      return item.type === "EFFECT" && typeof meta?.ownerTokenId === "string" && Number(meta.revision ?? 0) < 23
-        || item.type === "SHAPE" && meta?.kind === "effect-carrier";
-    }),
-  ]);
-  if (legacySceneItems.length) await OBR.scene.items.deleteItems(legacySceneItems.map((item) => item.id));
-  if (localItems.length) await OBR.scene.local.deleteItems(localItems.map((item) => item.id));
-
-  // A lens carrier and its shader live in the same local scene. This cleanup
-  // only examines this player's local items and cannot affect another player.
-  const currentLocal = await OBR.scene.local.getItems();
-  const referencedCarrierIds = new Set(currentLocal
-    .map((item) => getAuraMetadata(item)?.carrierId)
-    .filter((id) => typeof id === "string" && id.length > 0));
-  const orphanCarriers = currentLocal.filter((item) => {
-    const metadata = getAuraMetadata(item);
-    return metadata?.kind === "lens-carrier" && !referencedCarrierIds.has(item.id);
-  });
-  if (orphanCarriers.length) await OBR.scene.local.deleteItems(orphanCarriers.map((item) => item.id));
 }
 
 async function readSelectedTokens() {
@@ -569,14 +315,6 @@ async function getSelectedTokens() {
   const tokens = await readSelectedTokens();
   if (tokens.length === 0) throw new Error("Сначала выбери токен");
   return tokens;
-}
-
-async function mapInBatches(items, batchSize, mapper) {
-  const results = [];
-  for (let offset = 0; offset < items.length; offset += batchSize) {
-    results.push(...await Promise.all(items.slice(offset, offset + batchSize).map(mapper)));
-  }
-  return results;
 }
 
 function getAuraLabel(settings) {
@@ -741,15 +479,9 @@ async function addPreparedEntries(entries) {
     throw error;
   }
 
-  const hasSharedEffects = sceneItems.some(isSharedEffectDefinition);
-  if (hasSharedEffects) {
-    // A remote player's local renderer may fail independently. Keep the shared
-    // definition so that client can retry the render the next time it syncs.
-    try {
-      await syncLocalShaderEffects();
-    } catch (error) {
-      console.warn("Auras effect: local render will retry after sync", error);
-    }
+  if (sceneItems.some(isSharedEffectDefinition)) {
+    // The persistent background page on each participant renders local-only
+    // GPU Effects from these shared scene definitions.
     await notifyOtherClientsOfAuraChange();
   }
   return { sceneIds, localIds, count: entries.length, parts };
@@ -830,17 +562,10 @@ async function deleteAuraRecordParts(record) {
     throw new Error("Не удалось полностью удалить ауру");
   }
   if (metadata?.kind === "effect-definition") {
-    await deleteLocalRenderersForAura(record.id);
+    // The persistent background renderer reconciles local-only Effects from
+    // this shared-record deletion. Avoid a competing local delete here.
     await notifyOtherClientsOfAuraChange();
   }
-}
-
-async function deleteLocalRenderersForAura(sourceAuraId) {
-  if (typeof sourceAuraId !== "string" || !sourceAuraId) return;
-  const renderers = await OBR.scene.local.getItems((item) =>
-    isLocalShaderRenderer(item) && getAuraMetadata(item).sourceAuraId === sourceAuraId
-  );
-  if (renderers.length) await OBR.scene.local.deleteItems(renderers.map((item) => item.id));
 }
 
 async function saveAuraEdits() {
@@ -1007,14 +732,12 @@ async function loadSceneSettings() {
     setSceneReady(true);
     const metadata = await OBR.scene.getMetadata();
     if (!state.editing) writeForm(metadata?.[SETTINGS_KEY] ?? DEFAULT_SETTINGS);
-    await syncLocalShaderEffects();
     await refreshAuraList();
     setStatus("Готово");
   } catch (error) {
     console.warn("Auras effect: could not load scene settings", error);
     setSceneReady(true);
     if (!state.editing) writeForm(DEFAULT_SETTINGS);
-    await syncLocalShaderEffects().catch((syncError) => console.warn("Auras effect: initial shader sync failed", syncError));
     await refreshAuraList();
     setStatus("Настройки не загружены; используются стандартные", true);
   }
@@ -1034,32 +757,22 @@ function initializeOwlbear() {
       state.selectionKey = null;
       if (ready) {
         void loadSceneSettings();
-        void migrateLegacyLocalEffects()
-          .then(() => syncLocalShaderEffects())
-          .catch((error) => console.warn("Auras effect: legacy effect migration failed", error));
-        void cleanupLegacyEffectObjects().catch((error) => console.warn("Auras effect: legacy cleanup failed", error));
       } else {
         state.editing = null;
+        state.sharedAuraSignature = null;
+        state.localAuraSignature = null;
         syncEditControls();
       }
     });
 
-    OBR.scene.items.onChange(() => {
-      scheduleAuraListRefresh();
-      scheduleShaderSync();
+    OBR.scene.items.onChange((items) => {
+      handleSceneItemsChanged(items);
     });
-    OBR.scene.local.onChange(scheduleAuraListRefresh);
-    OBR.broadcast.onMessage(SHADER_SYNC_CHANNEL, (event) => {
-      if (event?.data?.type === "SYNC_AURAS") {
-        scheduleShaderSync();
-        scheduleAuraListRefresh();
-      }
+    OBR.scene.local.onChange((items) => {
+      handleLocalItemsChanged(items);
     });
+
     void loadSceneSettings();
-    void migrateLegacyLocalEffects()
-      .then(() => syncLocalShaderEffects())
-      .catch((error) => console.warn("Auras effect: legacy effect migration failed", error));
-    void cleanupLegacyEffectObjects().catch((error) => console.warn("Auras effect: legacy cleanup failed", error));
     window.setInterval(() => { void pollSelection(); }, 850);
   });
 }

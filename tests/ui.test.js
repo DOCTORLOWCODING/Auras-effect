@@ -39,9 +39,10 @@ test("multiple aura management controls exist", () => {
 
 test("selection changes refresh the aura list without blocking form controls", () => {
   assert.match(js, /window\.setInterval\(\(\) => \{ void pollSelection\(\); \}, 850\)/);
-  assert.match(js, /OBR\.scene\.items\.onChange\(\(\) => \{/);
-  assert.match(js, /scheduleAuraListRefresh\(\);\s*scheduleShaderSync\(\);/);
-  assert.match(js, /OBR\.scene\.local\.onChange\(scheduleAuraListRefresh\)/);
+  assert.match(js, /OBR\.scene\.items\.onChange\(\(items\) => \{/);
+  assert.match(js, /handleSceneItemsChanged\(items\)/);
+  assert.match(js, /OBR\.scene\.local\.onChange\(\(items\) => \{/);
+  assert.match(js, /handleLocalItemsChanged\(items\)/);
   assert.doesNotMatch(js, /querySelectorAll\(["']\.segment, #effect, #radius, #opacity, #color, #speed/);
 });
 

@@ -39,10 +39,10 @@ test("radius is always a whole number from 1 to 20", () => {
   assert.equal(normalizeSettings({ radius: 99 }).radius, 20);
 });
 
-test("manifest version is 2.5.0 and keeps description fields absent", () => {
+test("manifest version is 2.5.2 and keeps description fields absent", () => {
   const manifest = JSON.parse(fs.readFileSync(new URL("../public/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.name, "Auras effect");
-  assert.equal(manifest.version, "2.5.0");
+  assert.equal(manifest.version, "2.5.2");
   assert.equal(manifest.action.title, "Auras effect");
   assert.equal(manifest.description, undefined);
   assert.equal(manifest.action.description, undefined);

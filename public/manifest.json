@@ -1,6 +1,6 @@
 {
   "name": "Auras effect",
-  "version": "2.5.0",
+  "version": "2.5.2",
   "manifest_version": 1,
   "action": {
     "title": "Auras effect",
@@ -8,5 +8,6 @@
     "popover": "https://doctorlowcoding.github.io/Auras-effect/",
     "width": 380,
     "height": 900
-  }
+  },
+  "background_url": "https://doctorlowcoding.github.io/Auras-effect/background.html"
 }
