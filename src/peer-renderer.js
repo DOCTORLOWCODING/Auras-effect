@@ -9,6 +9,7 @@ import {
 } from "./geometry.js";
 import { SHADERS } from "./shaders.js";
 import { getShaderSceneSignature, getTokenSizeKey } from "./sync-state.js";
+import { mapInBatches } from "./batch.js";
 
 const EXTENSION_ID = "io.github.doctorlowcoding.token-auras";
 const AURA_KEY = `${EXTENSION_ID}/aura`;
@@ -206,14 +207,6 @@ function createLocalEffect(token, settingsInput, geometry, sourceAuraId, signatu
       renderSignature: signature,
     }))
     .build();
-}
-
-async function mapInBatches(items, batchSize, mapper) {
-  const results = [];
-  for (let index = 0; index < items.length; index += batchSize) {
-    results.push(...await Promise.all(items.slice(index, index + batchSize).map(mapper)));
-  }
-  return results;
 }
 
 async function getCachedTokenGeometry(token, dpi) {

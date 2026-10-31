@@ -19,6 +19,15 @@ function between(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
+
+test("both the popover and background renderer import the shared bounded batch helper", () => {
+  const batch = fs.readFileSync(path.join(root, "src/batch.js"), "utf8");
+  assert.match(main, /import \{ mapInBatches \} from ".\/batch\.js"/);
+  assert.match(peer, /import \{ mapInBatches \} from ".\/batch\.js"/);
+  assert.match(batch, /export async function mapInBatches\(/);
+  assert.doesNotMatch(peer, /async function mapInBatches\(/);
+});
+
 test("shader aura settings are stored as shared scene Shape definitions", () => {
   const definition = between(main, "function createEffectDefinition(", "function createAuraEntry(");
   assert.match(definition, /buildShape\(\)/);
@@ -59,7 +68,7 @@ test("each client reconstructs local-only GPU Effects from shared scene definiti
 });
 
 test("local renderers are keyed to a shared aura id and not editable aura records", () => {
-  const renderer = between(peer, "function createLocalEffect(", "async function mapInBatches(");
+  const renderer = between(peer, "function createLocalEffect(", "async function getCachedTokenGeometry(");
   assert.match(renderer, /metadataFor\(token, settings, "shader-renderer"/);
   assert.match(renderer, /sourceAuraId/);
   const recordMapper = between(main, "function toAuraRecord(", "async function readAuraRecords(");

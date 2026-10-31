@@ -43,7 +43,7 @@ test("fish-eye matches the Auras and Emanations Distort pulse and matrix pipelin
 });
 
 test("fish-eye is one standalone post-process effect attached directly to the source token", () => {
-  const effect = between(peerSource, "function createLocalEffect(", "async function mapInBatches(");
+  const effect = between(peerSource, "function createLocalEffect(", "async function getCachedTokenGeometry(");
   assert.match(effect, /effectType\("STANDALONE"\)/);
   assert.match(effect, /const origin = getTokenAttachmentOrigin\(token\)/);
   assert.match(effect, /\.position\(effectPosition\)/);
@@ -56,7 +56,7 @@ test("fish-eye is one standalone post-process effect attached directly to the so
 
 test("fish-eye uses the upstream extent formula and token attachment origin", () => {
   const geometry = between(peerSource, "function buildAuraGeometry(", "function hexToVector(");
-  const effect = between(peerSource, "function createLocalEffect(", "async function mapInBatches(");
+  const effect = between(peerSource, "function createLocalEffect(", "async function getCachedTokenGeometry(");
   assert.match(geometry, /calculateDistortExtent\(tokenGeometry, dpi, settings\.radius\)/);
   assert.match(effect, /getTokenAttachmentOrigin\(token\)/);
   assert.match(effect, /effectPosition = \{/);
@@ -85,7 +85,7 @@ test("bubble shield and tactile waves have independent shader programs", () => {
 
 test("Shape and every shader Effect use the same token attachment origin", () => {
   const shape = between(source, "function createSceneAura(", "function createEffectDefinition(");
-  const effect = between(peerSource, "function createLocalEffect(", "async function mapInBatches(");
+  const effect = between(peerSource, "function createLocalEffect(", "async function getCachedTokenGeometry(");
   assert.match(shape, /const origin = getTokenAttachmentOrigin\(token\)/);
   assert.match(shape, /\.position\(getAuraPosition\(origin\)\)/);
   assert.match(shape, /\.attachedTo\(token\.id\)/);

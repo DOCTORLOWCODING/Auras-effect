@@ -2,6 +2,7 @@ import OBR, { buildShape, isImage } from "@owlbear-rodeo/sdk";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./settings.js";
 import { calculateAuraDiameter, calculateDistortExtent, getAuraPosition, getTokenAttachmentOrigin, getTokenGeometry } from "./geometry.js";
 import { getAuraRecordSignature } from "./sync-state.js";
+import { mapInBatches } from "./batch.js";
 import "./style.css";
 
 const EXTENSION_ID = "io.github.doctorlowcoding.token-auras";
